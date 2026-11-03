@@ -1,12 +1,15 @@
-import { useEffect, useId, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Modal } from "./Dialog";
+import { HelpPanel } from "./HelpPanel";
+import type { HelpState } from "./HelpPanel";
+import { GardenAudio, isSoundName } from "./audio";
+import type { SoundName } from "./audio";
 import { BunnyFace, Flower, GardenScene, GrowingPlant, Icon } from "./Art";
 import { copy } from "./i18n";
 import type { Copy } from "./i18n";
 import {
   createSession,
   defaultSettings,
-  explanation,
   parseSaved,
   sessionReducer,
   summarize,
@@ -23,12 +26,6 @@ import type {
 
 const STORAGE_KEY = "bunny-garden:v1";
 type View = "home" | "quiz" | "results" | "stickers";
-interface HelpState {
-  question: Question;
-  mode: "hint" | "full";
-  step: number;
-  during: boolean;
-}
 
 function initialData(): SavedState {
   try {
@@ -44,244 +41,6 @@ function initialData(): SavedState {
     history: [],
     totals: { rounds: 0, questions: 0 },
   };
-}
-
-function Modal({
-  title,
-  children,
-  onClose,
-  closeLabel,
-  className = "",
-}: {
-  title: string;
-  children: ReactNode;
-  onClose: () => void;
-  closeLabel: string;
-  className?: string;
-}) {
-  const titleId = useId();
-  const ref = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    ref.current?.focus();
-    const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeRef.current();
-      if (event.key !== "Tab") return;
-      const nodes = ref.current?.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), input:not(:disabled), [href], [tabindex="0"]',
-      );
-      if (!nodes?.length) {
-        event.preventDefault();
-        return;
-      }
-      const first = nodes[0],
-        last = nodes[nodes.length - 1];
-      if (
-        event.shiftKey &&
-        (document.activeElement === first ||
-          document.activeElement === ref.current)
-      ) {
-        event.preventDefault();
-        last.focus();
-      } else if (
-        !event.shiftKey &&
-        (document.activeElement === last ||
-          document.activeElement === ref.current)
-      ) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", keydown);
-    return () => {
-      document.body.style.overflow = overflow;
-      document.removeEventListener("keydown", keydown);
-      if (previous?.isConnected) previous.focus();
-    };
-  }, []);
-  return (
-    <div
-      className="modal-backdrop"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        className={`modal ${className}`}
-        ref={ref}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-      >
-        <div className="modal-heading">
-          <h2 id={titleId}>{title}</h2>
-          <button
-            className="icon-button"
-            aria-label={closeLabel}
-            onClick={onClose}
-          >
-            <Icon name="close" />
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Blocks({
-  tens,
-  ones,
-  removeTens = 0,
-  removeOnes = 0,
-  tone = "sage",
-}: {
-  tens: number;
-  ones: number;
-  removeTens?: number;
-  removeOnes?: number;
-  tone?: string;
-}) {
-  return (
-    <div className={`blocks ${tone}`} aria-hidden="true">
-      <div className="rods">
-        {Array.from({ length: tens }, (_, i) => (
-          <span
-            className={`rod ${i >= tens - removeTens ? "removed" : ""}`}
-            key={i}
-          >
-            {Array.from({ length: 10 }, (_, j) => (
-              <i key={j} />
-            ))}
-          </span>
-        ))}
-      </div>
-      <div className="dots">
-        {Array.from({ length: ones }, (_, i) => (
-          <span
-            className={`dot ${i >= ones - removeOnes ? "removed" : ""}`}
-            key={i}
-          />
-        ))}
-      </div>
-      {tens === 0 && ones === 0 && <span className="zero-block">0</span>}
-    </div>
-  );
-}
-
-function HelpPanel({
-  help,
-  setHelp,
-  t,
-  onClose,
-}: {
-  help: HelpState;
-  setHelp: (value: HelpState) => void;
-  t: Copy;
-  onClose: () => void;
-}) {
-  const q = help.question;
-  const e = explanation(q);
-  const hint = help.mode === "hint";
-  const step = help.step;
-  const tens = hint || step === 0;
-  const countA = hint
-    ? { tens: Math.floor(q.a / 10), ones: q.a % 10 }
-    : step === 2
-      ? { tens: Math.floor(q.answer / 10), ones: q.answer % 10 }
-      : { tens: tens ? Math.floor(q.a / 10) : 0, ones: tens ? 0 : q.a % 10 };
-  const countB = hint
-    ? { tens: Math.floor(q.b / 10), ones: q.b % 10 }
-    : { tens: tens ? Math.floor(q.b / 10) : 0, ones: tens ? 0 : q.b % 10 };
-  return (
-    <Modal
-      title={hint ? t.hintTitle : t.fullHelp}
-      onClose={onClose}
-      closeLabel={t.close}
-      className="help-modal"
-    >
-      <div className="help-problem">
-        {q.a} {e.sign} {q.b} <span>= ?</span>
-      </div>
-      <p className="help-caption">
-        {hint ? t.hintText : [t.tens, t.ones, t.together][step]}
-      </p>
-      <div className="visual-calculation">
-        <Blocks
-          {...countA}
-          removeTens={q.op === "subtract" && step !== 2 ? countB.tens : 0}
-          removeOnes={q.op === "subtract" && step !== 2 ? countB.ones : 0}
-        />
-        {q.op === "add" && (hint || step !== 2) && (
-          <>
-            <span className="visual-plus">+</span>
-            <Blocks {...countB} tone="lilac" />
-          </>
-        )}
-      </div>
-      <p className="diagram-key">
-        <span className="key-rod" /> = 10 <span className="key-dot" /> = 1{" "}
-        {q.op === "subtract" && (hint || step !== 2) && (
-          <span className="remove-key">↗ {t.remove}</span>
-        )}
-      </p>
-      {!hint && (
-        <div className="explanation-equation" aria-live="polite">
-          {e.steps[step]}
-        </div>
-      )}
-      {hint ? (
-        <>
-          <p className="help-note">{t.hintUsed}</p>
-          <div className="modal-actions">
-            <button className="button secondary" onClick={onClose}>
-              {t.gotIt}
-            </button>
-            <button
-              className="button primary"
-              onClick={() => setHelp({ ...help, mode: "full", step: 0 })}
-            >
-              {t.showMe}
-              <Icon name="arrow" />
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="step-dots" aria-label={`${t.step} ${step + 1} / 3`}>
-            {[0, 1, 2].map((i) => (
-              <span className={i === step ? "active" : ""} key={i} />
-            ))}
-          </div>
-          <div className="modal-actions">
-            <button
-              className="button secondary"
-              onClick={() =>
-                setHelp({ ...help, step: step === 0 ? 0 : step - 1 })
-              }
-              disabled={step === 0}
-            >
-              {t.previous}
-            </button>
-            <button
-              className="button primary"
-              onClick={() =>
-                step < 2 ? setHelp({ ...help, step: step + 1 }) : onClose()
-              }
-            >
-              {step < 2 ? t.nextStep : t.gotIt}
-              <Icon name={step < 2 ? "arrow" : "check"} />
-            </button>
-          </div>
-        </>
-      )}
-    </Modal>
-  );
 }
 
 function SettingsPanel({
@@ -342,6 +101,7 @@ function SettingsPanel({
         </span>
         <button
           role="switch"
+          data-sound="none"
           aria-label={t.soundLabel}
           aria-checked={settings.sound}
           className={`switch ${settings.sound ? "on" : ""}`}
@@ -370,7 +130,7 @@ export function App() {
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [hintOpen, setHintOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const audioRef = useRef<AudioContext | null>(null);
+  const audioRef = useRef<GardenAudio | null>(null);
   const t = copy[data.settings.language];
   const session = data.session;
   const active = !!session && !session.complete;
@@ -401,7 +161,13 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [view]);
 
+  function playSound(name: SoundName, enabled = data.settings.sound) {
+    const audio = audioRef.current || (audioRef.current = new GardenAudio());
+    void audio.play(name, enabled);
+  }
   function updateSettings(settings: Partial<Settings>) {
+    if (settings.sound === true) playSound("start", true);
+    if (settings.sound === false) audioRef.current?.mute();
     setData((previous) => ({
       ...previous,
       settings: { ...previous.settings, ...settings },
@@ -428,33 +194,9 @@ export function App() {
       };
     });
   }
-  function playChime() {
-    if (!data.settings.sound) return;
-    try {
-      const context =
-        audioRef.current || (audioRef.current = new AudioContext());
-      void context.resume().catch(() => {});
-      [523.25, 659.25, 783.99].forEach((frequency, i) => {
-        const oscillator = context.createOscillator(),
-          gain = context.createGain(),
-          time = context.currentTime + i * 0.1;
-        oscillator.type = "sine";
-        oscillator.frequency.value = frequency;
-        gain.gain.setValueAtTime(0, time);
-        gain.gain.linearRampToValueAtTime(0.06, time + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.3);
-        oscillator.connect(gain);
-        gain.connect(context.destination);
-        oscillator.start(time);
-        oscillator.stop(time + 0.32);
-      });
-    } catch {
-      /* Sounds are optional, including on older tablet browsers. */
-    }
-  }
   function submit() {
     if (!session || session.phase !== "answering" || !session.input) return;
-    if (Number(session.input) === question?.answer) playChime();
+    playSound(Number(session.input) === question?.answer ? "correct" : "retry");
     const predicted = sessionReducer(session, { type: "submit" });
     dispatch({ type: "submit" });
     if (predicted.phase === "walkthrough" && question)
@@ -462,6 +204,9 @@ export function App() {
   }
   function next() {
     if (!session || session.phase === "answering") return;
+    playSound(
+      session.index + 1 === session.questions.length ? "complete" : "step",
+    );
     if (session.index + 1 === session.questions.length) {
       setInspectedId(null);
       setView("results");
@@ -471,6 +216,7 @@ export function App() {
   }
   function openHelp(mode: "hint" | "full" = "hint") {
     if (!question || !session) return;
+    playSound("hint");
     if (session.phase === "answering") dispatch({ type: "help" });
     setHelp({ question, mode, step: 0, during: true });
     setHintOpen(true);
@@ -507,9 +253,12 @@ export function App() {
         return;
       if (/^\d$/.test(event.key)) {
         event.preventDefault();
+        if (session.phase === "answering" && session.input.length < 2)
+          playSound("tap");
         dispatch({ type: "digit", digit: event.key });
       } else if (event.key === "Backspace" || event.key === "Delete") {
         event.preventDefault();
+        if (session.phase === "answering" && session.input) playSound("tap");
         dispatch({ type: "erase" });
       } else if (
         event.key === "Enter" &&
@@ -529,7 +278,18 @@ export function App() {
   };
   const modeLabels = { add: t.add, subtract: t.subtract, mixed: t.mixed };
   return (
-    <div className={`app view-${view}`}>
+    <div
+      className={`app view-${view}`}
+      onClickCapture={(event) => {
+        if (!(event.target instanceof Element)) return;
+        const button = event.target.closest("button");
+        if (!button || button.disabled || button.dataset.sound === "none")
+          return;
+        playSound(
+          isSoundName(button.dataset.sound) ? button.dataset.sound : "tap",
+        );
+      }}
+    >
       <header className="site-header">
         <div className="header-inner">
           <button
@@ -595,6 +355,17 @@ export function App() {
                 EN
               </button>
             </div>
+            <button
+              className="icon-button sound-toggle"
+              data-sound="none"
+              aria-label={data.settings.sound ? t.muteSound : t.enableSound}
+              aria-pressed={data.settings.sound}
+              title={data.settings.sound ? t.muteSound : t.enableSound}
+              onClick={() => updateSettings({ sound: !data.settings.sound })}
+            >
+              <Icon name={data.settings.sound ? "sound" : "mute"} size={21} />
+              <span>{data.settings.sound ? t.soundOn : t.soundOff}</span>
+            </button>
             <button
               className="icon-button settings-button"
               aria-label={t.settings}
@@ -716,6 +487,7 @@ export function App() {
               </div>
               <button
                 className="button primary start-button"
+                data-sound="start"
                 onClick={() => (active ? navigate("quiz") : begin())}
               >
                 {active ? t.resume : t.start}
@@ -793,14 +565,6 @@ export function App() {
             <span className="quiz-mode">
               {session.review ? t.review : modeLabels[session.operation]}
             </span>
-            <button
-              className="icon-button"
-              aria-label={t.soundLabel}
-              aria-pressed={data.settings.sound}
-              onClick={() => updateSettings({ sound: !data.settings.sound })}
-            >
-              <Icon name={data.settings.sound ? "sound" : "mute"} size={20} />
-            </button>
           </div>
           <div className="progress-row">
             <span className="progress-flower">
@@ -894,6 +658,7 @@ export function App() {
                 </div>
                 <button
                   className="hint-button"
+                  data-sound="none"
                   onClick={() =>
                     openHelp(session.phase === "answering" ? "hint" : "full")
                   }
@@ -943,6 +708,7 @@ export function App() {
                           : `${t.digit} ${key}`
                     }
                     className={`key ${key === "?" || key === "erase" ? "utility" : ""}`}
+                    data-sound={key === "?" ? "none" : "tap"}
                     disabled={session.phase !== "answering" && key !== "?"}
                     onClick={() =>
                       key === "erase"
@@ -966,6 +732,7 @@ export function App() {
               </div>
               <button
                 className="button primary check-button"
+                data-sound="none"
                 disabled={session.phase === "answering" && !session.input}
                 onClick={() =>
                   session.phase === "answering" ? submit() : next()

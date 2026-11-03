@@ -63,7 +63,7 @@ export const defaultSettings: Settings = {
   level: "garden",
   operation: "mixed",
   length: 15,
-  sound: false,
+  sound: true,
 };
 
 export function random(seed: number) {
